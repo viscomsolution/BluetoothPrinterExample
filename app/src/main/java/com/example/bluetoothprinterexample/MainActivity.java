@@ -3,19 +3,28 @@ package com.example.bluetoothprinterexample;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Handler;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,6 +35,8 @@ public class MainActivity extends AppCompatActivity {
 
     // will enable user to enter any text to be printed
     EditText myTextbox;
+
+    ListView lvDevice;
 
     // android built in classes for bluetooth operations
     BluetoothAdapter mBluetoothAdapter;
@@ -41,6 +52,10 @@ public class MainActivity extends AppCompatActivity {
     int readBufferPosition;
     volatile boolean stopWorker;
 
+    final ArrayList<CCheckpoint> m_listContent = new ArrayList<>();
+    CChecklistAdapter m_adaptCheckList;
+    Set<BluetoothDevice> m_pairedDevices;
+
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     @Override
@@ -48,26 +63,44 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // we are going to have three buttons for specific functions
-        Button openButton = (Button) findViewById(R.id.open);
-        Button sendButton = (Button) findViewById(R.id.send);
-        Button closeButton = (Button) findViewById(R.id.close);
+        lvDevice = findViewById(R.id.lvDevice);
 
         // text label and input box
-        myLabel = (TextView) findViewById(R.id.label);
-        myTextbox = (EditText) findViewById(R.id.entry);
+        myLabel = findViewById(R.id.label);
+        myTextbox = findViewById(R.id.entry);
 
+        m_adaptCheckList = new CChecklistAdapter(this, m_listContent);
+
+        lvDevice.setAdapter(m_adaptCheckList);
+
+        lvDevice.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, final int position, long id) {
+                if(m_pairedDevices.size() > 0)
+                {
+                    String deviceName = m_listContent.get(position).m_deviceName;
+                    m_listContent.get(position).m_status = CCheckpoint.CONNECTED;
+                    for (BluetoothDevice device : m_pairedDevices) {
+                        if(device.getName().equals(deviceName)) {
+                            mmDevice = device;
+                            m_adaptCheckList.notifyDataSetChanged();
+
+                            openBT();
+                            break;
+                        }
+                    }
+                }
+            }
+        });
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    public void btn_open_onclick(View view) {
-        try {
-            findBT();
-            openBT();
-        } catch (IOException ex) {
-            ex.printStackTrace();
-        }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        findBT();
+
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -87,22 +120,23 @@ public class MainActivity extends AppCompatActivity {
                 startActivityForResult(enableBluetooth, 0);
             }
 
-            Set<BluetoothDevice> pairedDevices = mBluetoothAdapter.getBondedDevices();
+            m_pairedDevices = mBluetoothAdapter.getBondedDevices();
 
-            if(pairedDevices.size() > 0) {
-                for (BluetoothDevice device : pairedDevices) {
+            if(m_pairedDevices.size() > 0) {
+                m_listContent.clear();
+                for (BluetoothDevice device : m_pairedDevices) {
 
                     // RPP300 is the name of the bluetooth printer device
                     // we got this name from the list of paired devices
+
                     String deviceName = device.getName();
-                    if (deviceName.equals("MTP-2")) {
-                        mmDevice = device;
-                        break;
-                    }
+                    m_listContent.add(new CCheckpoint(deviceName, device.getAddress(), CCheckpoint.UNCONNECT));
+
                 }
+                m_adaptCheckList.notifyDataSetChanged();
             }
 
-            myLabel.setText("Bluetooth device found.");
+            //myLabel.setText("Bluetooth device found.");
 
         }catch(Exception e){
             e.printStackTrace();
@@ -112,7 +146,7 @@ public class MainActivity extends AppCompatActivity {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     // tries to open a connection to the bluetooth printer device
-    void openBT() throws IOException {
+    void openBT() {
         try {
 
             // Standard SerialPortService ID
@@ -131,6 +165,8 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /*
      * after opening a connection to bluetooth printer device,
@@ -255,4 +291,83 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+
+    class CCheckpoint {
+
+        static final int UNCONNECT = 0;
+        static final int CONNECTED = 1;
+
+        String m_deviceName;
+        String m_checkPointID;
+        int m_status;
+
+        public CCheckpoint(String name, String ID, int status)
+        {
+            this.m_deviceName = name;
+            this.m_checkPointID = ID;
+            this.m_status = status;
+        }
+
+        public String getCheckPointName() {
+            return m_deviceName;
+        }
+
+        public String getCheckPointID() {
+            return m_checkPointID;
+        }
+
+        public int getStatus() {
+            return m_status;
+        }
+
+        public void setStatus(int status) {
+            m_status = status;
+        }
+
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+
+    class CChecklistAdapter extends ArrayAdapter<CCheckpoint> {
+        private final Context context;
+        private final ArrayList<CCheckpoint> itemsArrayList;
+
+        public CChecklistAdapter(@NonNull Context context, ArrayList<CCheckpoint> itemsArrayList) {
+            super(context, R.layout.list_item_with_icon, itemsArrayList);
+
+            this.context = context;
+            this.itemsArrayList = itemsArrayList;
+        }
+
+        @Override
+        public CCheckpoint getItem(int position) {
+            return itemsArrayList.get(position);
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            LayoutInflater inflater = (LayoutInflater) context
+                    .getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+
+            View rowView = inflater.inflate(R.layout.list_item_with_icon, parent, false);
+
+            ImageView iconStatus = rowView.findViewById(R.id.imgIcon);
+            TextView checkPointName = rowView.findViewById(R.id.txtCheckPointName);
+
+            switch (itemsArrayList.get(position).getStatus()) {
+                case CCheckpoint.UNCONNECT:
+                    iconStatus.setImageResource(R.drawable.check_blank);
+                    break;
+                case CCheckpoint.CONNECTED:
+                    iconStatus.setImageResource(R.drawable.check_mark);
+                    break;
+            }
+            checkPointName.setText(itemsArrayList.get(position).getCheckPointName());
+
+            return rowView;
+        }
+    }
+
 }
